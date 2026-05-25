@@ -1029,13 +1029,13 @@ class StaffLoggerCog(commands.Cog, name="Staff Logger"):
             changed = True
         return changed
 
-    async def _send_weekly_report(self, report_week_id: str):
+    async def _send_weekly_report(self, report_week_id: str) -> bool:
         channel = self.bot.get_channel(REPORT_CHANNEL_ID)
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(REPORT_CHANNEL_ID)
             except discord.HTTPException:
-                return
+                return False
 
         guild = channel.guild if isinstance(channel, discord.TextChannel) else None
         self.cursor.execute(
@@ -1100,18 +1100,24 @@ class StaffLoggerCog(commands.Cog, name="Staff Logger"):
             )
 
         embed.set_footer(text="complete | not met | break")
-        await channel.send(embed=embed)
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            return False
+        return True
 
-    async def _roll_week_if_needed(self):
+    async def _roll_week_if_needed(self) -> tuple[bool, str | None]:
         current_week = self._current_week_id()
         active_week = self._config_get("active_week_id", current_week)
         if active_week == current_week:
-            return
+            return False, None
 
-        await self._send_weekly_report(active_week)
+        if not await self._send_weekly_report(active_week):
+            return False, active_week
         self.cursor.execute("DELETE FROM weekly_logs WHERE week_id = ?", (active_week,))
         self.conn.commit()
         self._config_set("active_week_id", current_week)
+        return True, active_week
 
     @tasks.loop(minutes=1)
     async def weekly_reset_loop(self):
@@ -1333,35 +1339,77 @@ class StaffLoggerCog(commands.Cog, name="Staff Logger"):
         view = StaffProgressView(self, ctx.guild, ctx.author.id)
         await ctx.send(embed=embed, view=view)
 
-    @staff_group.command(name="updateregistry", description="Sync the staff registry and remove users with no staff roles")
+    def _build_registry_sync_embed(
+        self,
+        updated_count: int,
+        removed_count: int,
+        *,
+        reset_completed: bool,
+        failed_week_id: str | None,
+        synced_week_id: str | None,
+    ) -> discord.Embed:
+        embed = discord.Embed(title="Staff Registry Synced", color=discord.Color.blurple())
+        embed.add_field(name="Roles Synced", value=str(updated_count), inline=True)
+        embed.add_field(name="Users Removed", value=str(removed_count), inline=True)
+        embed.add_field(
+            name="Protected",
+            value="Members on break or holding the Touching Grass role were left untouched.",
+            inline=False,
+        )
+        if failed_week_id:
+            embed.add_field(
+                name="Weekly Reset",
+                value=f"Report for **{self._week_label(failed_week_id)}** could not be sent, so that week was not cleared. Run this again after the report channel is available.",
+                inline=False,
+            )
+        elif reset_completed and synced_week_id:
+            embed.add_field(
+                name="Weekly Reset",
+                value=f"Sent the missed report for **{self._week_label(synced_week_id)}** and cleared that week.",
+                inline=False,
+            )
+        else:
+            embed.add_field(name="Weekly Reset", value="Already synced for the current week.", inline=False)
+        return embed
+
+    async def _sync_registry_and_reset(self, guild: discord.Guild) -> discord.Embed:
+        updated_count, removed_count = await self._refresh_staff_registry(guild)
+        reset_completed, week_id = await self._roll_week_if_needed()
+        return self._build_registry_sync_embed(
+            updated_count,
+            removed_count,
+            reset_completed=reset_completed,
+            failed_week_id=week_id if not reset_completed else None,
+            synced_week_id=week_id if reset_completed else None,
+        )
+
+    @staff_group.command(name="updateregistry", description="Sync the staff registry and retry any pending weekly reset")
     @app_commands.checks.has_permissions(administrator=True)
     async def staff_update_registry(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        updated_count, removed_count = await self._refresh_staff_registry(interaction.guild)
-
-        embed = discord.Embed(title="Staff Registry Updated", color=discord.Color.blurple())
-        embed.add_field(name="Roles Synced", value=str(updated_count), inline=True)
-        embed.add_field(name="Users Removed", value=str(removed_count), inline=True)
-        embed.add_field(
-            name="Protected",
-            value="Members on break or holding the Touching Grass role were left untouched.",
-            inline=False,
-        )
+        if interaction.guild is None:
+            await interaction.followup.send("This command can only be used in a server.", ephemeral=True)
+            return
+        embed = await self._sync_registry_and_reset(interaction.guild)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @commands.command(name="updateregistry")
+    @staff_group.command(name="sync", description="Sync staff registry and retry any pending weekly reset")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def staff_sync(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if interaction.guild is None:
+            await interaction.followup.send("This command can only be used in a server.", ephemeral=True)
+            return
+        embed = await self._sync_registry_and_reset(interaction.guild)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @commands.command(name="updateregistry", aliases=["staffsync", "syncstaff"])
     @commands.has_permissions(administrator=True)
     async def staff_update_registry_prefix(self, ctx: commands.Context):
-        updated_count, removed_count = await self._refresh_staff_registry(ctx.guild)
-
-        embed = discord.Embed(title="Staff Registry Updated", color=discord.Color.blurple())
-        embed.add_field(name="Roles Synced", value=str(updated_count), inline=True)
-        embed.add_field(name="Users Removed", value=str(removed_count), inline=True)
-        embed.add_field(
-            name="Protected",
-            value="Members on break or holding the Touching Grass role were left untouched.",
-            inline=False,
-        )
+        if ctx.guild is None:
+            await ctx.send("This command can only be used in a server.")
+            return
+        embed = await self._sync_registry_and_reset(ctx.guild)
         await ctx.send(embed=embed)
 
     @app_commands.command(name="editlifetimestats", description="Admin only: set lifetime profile totals")
