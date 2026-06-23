@@ -1058,6 +1058,8 @@ class StaffLoggerCog(commands.Cog, name="Staff Logger"):
 
         sections: dict[str, list[str]] = {"gman": [], "eman": [], "mod": []}
         for user_id, role_type_value, is_on_break in staff_rows:
+            if await self._should_hide_from_staff_progress(guild, user_id):
+                continue
             role_types = self._parse_role_types(role_type_value)
             if not role_types:
                 continue
@@ -1099,7 +1101,6 @@ class StaffLoggerCog(commands.Cog, name="Staff Logger"):
                 inline=False,
             )
 
-        embed.set_footer(text="complete | not met | break")
         try:
             await channel.send(embed=embed)
         except discord.HTTPException:

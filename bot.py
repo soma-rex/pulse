@@ -129,7 +129,8 @@ async def setup_hook():
     await bot.load_extension("cogs.fun")
     await bot.load_extension("cogs.calculator")
     await bot.load_extension("cogs.anime_guess")
-    await bot.load_extension("cogs.rumble")
+    # Temporarily disabled: rumble tracker needs fixes before re-enabling.
+    # await bot.load_extension("cogs.rumble")
     await bot.load_extension("cogs.stats")
     await bot.load_extension("cogs.config_cog")
     await bot.load_extension("cogs.admin")
