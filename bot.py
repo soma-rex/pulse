@@ -56,7 +56,8 @@ def extract_emojis(text):
     )
     return emoji_pattern.findall(text)
 
-DB_PATH = "messages.db"
+os.makedirs("data", exist_ok=True)
+DB_PATH = os.path.join("data", "messages.db")
 TOKEN_ENV_VARS = ("DISCORD_TOKEN", "BOT_TOKEN")
 DEFAULT_COOLDOWN = 10
 

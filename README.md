@@ -49,8 +49,9 @@ The project is organized to keep logic separated and maintainable:
 ```
 pulse/
 │── cogs/             # All command modules (games, admin, AI, etc.)
-│── main.py           # Entry point of the bot
-│── messages.db       # SQLite database
+│── data/             # Local database and persistent storage
+│   └── messages.db   # SQLite database
+│── bot.py            # Entry point of the bot
 │── .env              # Environment variables (token, API keys)
 ```
 

@@ -2,5 +2,6 @@
 .venv/
 __pycache__/
 *.pyc
-messages.db
+*.db
 .idea/
+./data
